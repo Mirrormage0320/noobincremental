@@ -9,7 +9,7 @@ local GUI_NAME = "ReaperNoobFarm"
 local OUT_POSITION = Vector3.new(-14001.6, 0.8, 8942.0)
 local IN_POSITION = Vector3.new(-13986.1, -0.1, 8962.8)
 local EMPTY_CONFIRM = 0.25
-local FULL_SIZE = UDim2.fromOffset(270, 324)
+local FULL_SIZE = UDim2.fromOffset(270, 356)
 local MIN_SIZE = UDim2.fromOffset(270, 34)
 
 local env = (getgenv and getgenv()) or _G
@@ -38,6 +38,7 @@ local State = {
     Distance = 3,
     OutWait = 0.5,
     InWait = 1.5,
+    StuckLimit = 5, -- ennyi mp után reseteli a zónát, ha ugyanazt a noobot ütöd (0 = ki)
 }
 
 local function getHRP()
@@ -160,8 +161,14 @@ local function startFarm()
                 State.Status = "farming"
                 local humanoid = target:FindFirstChildOfClass("Humanoid")
                 local watchHealth = humanoid ~= nil and humanoid.Health > 0
+                local targetStartedAt = os.clock()
+                local stuck = false
                 while active() and isPresent(target) do
                     if watchHealth and humanoid.Health <= 0 then
+                        break
+                    end
+                    if State.StuckLimit > 0 and os.clock() - targetStartedAt >= State.StuckLimit then
+                        stuck = true
                         break
                     end
                     local currentHRP = getHRP()
@@ -177,8 +184,13 @@ local function startFarm()
                 if not active() then
                     return
                 end
-                State.Done = State.Done + 1
                 State.Target = nil
+                if stuck then
+                    resetZone(active)
+                    emptySince = nil
+                else
+                    State.Done = State.Done + 1
+                end
             else
                 State.Target = nil
                 State.Status = "waiting"
@@ -349,6 +361,7 @@ inputRow("Height", 158, "Height", -100, 100)
 inputRow("Distance", 190, "Distance", -100, 100)
 inputRow("Out wait (s)", 222, "OutWait", 0, 30)
 inputRow("In wait (s)", 254, "InWait", 0, 30)
+inputRow("Stuck limit (s)", 286, "StuckLimit", 0, 600)
 
 local dragging = false
 local dragStart
