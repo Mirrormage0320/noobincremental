@@ -40,13 +40,12 @@ local State = {
     Distance = 3,
     OutWait = 0.5,
     InWait = 1.5,
-    StuckLimit = 5, -- ennyi mp után reseteli a zónát, ha ugyanazt a noobot ütöd (0 = ki)
+    StuckLimit = 5,
 
-    -- House teleport
-    HouseBusy = false, -- amíg true, a Reaper farm szünetel
+    HouseBusy = false,
     HouseStatus = "Idle",
-    HouseStay = 2, -- ennyi mp-ig marad a háznál
-    HouseFrontStay = 0.5, -- ennyi mp-ig marad a ház előtt, mielőtt bemegy
+    HouseStay = 2,
+    HouseFrontStay = 0.5,
     Houses = {
         {Label = "House 1", Front = Vector3.new(-14131.2, 0.8, 8652.2), Position = Vector3.new(-14131.6, 1.4, 8644.8), Enabled = false, Seconds = 300, Last = -math.huge},
         {Label = "House 2", Front = Vector3.new(-14127.5, 0.8, 8894.1), Position = Vector3.new(-14127.6, 1.4, 8902.1), Enabled = false, Seconds = 300, Last = -math.huge},
@@ -55,10 +54,6 @@ local State = {
 }
 
 local alive = true
-
-----------------------------------------------------------------------
--- Közös segédek
-----------------------------------------------------------------------
 
 local function getHRP()
     local character = LocalPlayer.Character
@@ -71,8 +66,6 @@ local function placeAt(hrp, position)
     hrp.AssemblyAngularVelocity = Vector3.zero
 end
 
--- Ha éppen house teleport zajlik, a farm itt megvárja a végét.
--- Visszaadja, mennyi ideig várt (hogy a stuck időzítő ne számolja bele).
 local function waitForHouse(active)
     if not State.HouseBusy then
         return 0
@@ -83,10 +76,6 @@ local function waitForHouse(active)
     end
     return os.clock() - startedAt
 end
-
-----------------------------------------------------------------------
--- Noob farm
-----------------------------------------------------------------------
 
 local function getRoot(model)
     return model:FindFirstChild("HumanoidRootPart")
@@ -263,20 +252,14 @@ local function stopFarm()
     State.Status = "stopped"
 end
 
-----------------------------------------------------------------------
--- House teleport
-----------------------------------------------------------------------
-
 local function visitHouse(house)
-    -- elmentjük, honnan teleportálunk el (csak akkor kell, ha nem fut a farm)
     local startHRP = getHRP()
     local origin = startHRP and startHRP.CFrame
 
-    State.HouseBusy = true -- a farm szünetel
+    State.HouseBusy = true
     State.HouseStatus = "Teleporting to " .. house.Label
 
     pcall(function()
-        -- 1) először a ház elé, 2) utána a házba (a beégetett koordinátára)
         local stages = {
             {position = house.Front, seconds = State.HouseFrontStay},
             {position = house.Position, seconds = State.HouseStay},
@@ -296,7 +279,6 @@ local function visitHouse(house)
         end
     end)
 
-    -- ha nem fut a farm, visszateleportál oda, ahonnan elindult
     if origin and alive and not State.Running then
         pcall(function()
             local hrp = getHRP()
@@ -328,10 +310,6 @@ local function houseScheduler()
         task.wait(0.25)
     end
 end
-
-----------------------------------------------------------------------
--- GUI
-----------------------------------------------------------------------
 
 local function create(className, props, parent)
     local instance = Instance.new(className)
@@ -423,7 +401,6 @@ local content = create("Frame", {
     BackgroundTransparency = 1,
 }, main)
 
--- Tabs
 local function tabButton(text, position)
     local button = create("TextButton", {
         Size = UDim2.new(0.5, -17, 0, 26),
@@ -481,7 +458,6 @@ local function infoLabel(parent, y)
     }, parent)
 end
 
--- store: melyik táblában van az érték (alapból State)
 local function inputRow(parent, labelText, y, key, lo, hi, store)
     store = store or State
     create("TextLabel", {
@@ -515,7 +491,6 @@ local function inputRow(parent, labelText, y, key, lo, hi, store)
     end)
 end
 
--- Farm page
 local toggleButton = bigButton(farmPage, "START", GREEN)
 
 local statusLabel = infoLabel(farmPage, 62)
@@ -529,7 +504,6 @@ inputRow(farmPage, "Out wait (s)", 222, "OutWait", 0, 30)
 inputRow(farmPage, "In wait (s)", 254, "InWait", 0, 30)
 inputRow(farmPage, "Stuck limit (s)", 286, "StuckLimit", 0, 600)
 
--- Houses page
 local houseStatusLabel = infoLabel(housesPage, 8)
 local houseButtons = {}
 
@@ -552,7 +526,7 @@ for index, house in ipairs(State.Houses) do
     button.MouseButton1Click:Connect(function()
         house.Enabled = not house.Enabled
         if house.Enabled then
-            house.Last = -math.huge -- bekapcsoláskor rögtön teleportál
+            house.Last = -math.huge
         end
     end)
 
@@ -562,7 +536,6 @@ end
 inputRow(housesPage, "Stay at house (s)", 32 + #State.Houses * 66, "HouseStay", 0.2, 60)
 inputRow(housesPage, "Stay in front (s)", 64 + #State.Houses * 66, "HouseFrontStay", 0.1, 30)
 
--- Tab switching
 local function setTab(name)
     activeTab = name
     farmPage.Visible = name == "farm"
@@ -584,7 +557,6 @@ end)
 
 setTab("farm")
 
--- Dragging
 local dragging = false
 local dragStart
 local startPos
@@ -651,7 +623,6 @@ pcall(function()
 end)
 
 local function refresh()
-    -- Farm
     local running = State.Running
     local info = Statuses[State.Status]
     toggleButton.Text = running and "STOP" or "START"
@@ -668,7 +639,6 @@ local function refresh()
     countLabel.Text = "Noobs: " .. #getTargets() .. "   Done: " .. State.Done
     resetLabel.Text = "Zone resets: " .. State.Resets
 
-    -- Houses
     houseStatusLabel.Text = "Status: " .. State.HouseStatus
     if State.HouseBusy then
         houseStatusLabel.TextColor3 = Color3.fromRGB(110, 170, 255)
