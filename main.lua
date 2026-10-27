@@ -6,6 +6,11 @@ local LocalPlayer = Players.LocalPlayer
 
 local FOLDER_NAME = "ReaperNoobs"
 local GUI_NAME = "ReaperNoobFarm"
+local OUT_POSITION = Vector3.new(-14001.6, 0.8, 8942.0)
+local IN_POSITION = Vector3.new(-13986.1, -0.1, 8962.8)
+local EMPTY_CONFIRM = 0.25
+local FULL_SIZE = UDim2.fromOffset(270, 324)
+local MIN_SIZE = UDim2.fromOffset(270, 34)
 
 local env = (getgenv and getgenv()) or _G
 
@@ -19,6 +24,7 @@ local Statuses = {
     stopped = {"Stopped", Color3.fromRGB(230, 100, 100)},
     farming = {"Farming", Color3.fromRGB(90, 220, 130)},
     waiting = {"Waiting for noobs", Color3.fromRGB(240, 200, 80)},
+    resetting = {"Resetting zone", Color3.fromRGB(110, 170, 255)},
 }
 
 local State = {
@@ -27,8 +33,11 @@ local State = {
     Status = "stopped",
     Target = nil,
     Done = 0,
+    Resets = 0,
     Height = 0,
     Distance = 3,
+    OutWait = 0.5,
+    InWait = 1.5,
 }
 
 local function getHRP()
@@ -65,11 +74,11 @@ local function getTargets()
     return list
 end
 
-local function pickTarget()
-    local hrp = getHRP()
-    if not hrp then
-        return nil
-    end
+local function hasTargets()
+    return #getTargets() > 0
+end
+
+local function pickTarget(hrp)
     local best
     local bestScore
     for _, model in ipairs(getTargets()) do
@@ -97,6 +106,37 @@ local function standAt(hrp, root)
     hrp.AssemblyAngularVelocity = Vector3.zero
 end
 
+local function placeAt(hrp, position)
+    hrp.CFrame = CFrame.new(position)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function holdAt(position, seconds, active, stopWhen)
+    local startedAt = os.clock()
+    repeat
+        local hrp = getHRP()
+        if hrp then
+            pcall(placeAt, hrp, position)
+        end
+        RunService.Heartbeat:Wait()
+        if stopWhen and stopWhen() then
+            return
+        end
+    until not active() or os.clock() - startedAt >= seconds
+end
+
+local function resetZone(active)
+    State.Status = "resetting"
+    State.Target = nil
+    State.Resets = State.Resets + 1
+    holdAt(OUT_POSITION, State.OutWait, active)
+    if not active() then
+        return
+    end
+    holdAt(IN_POSITION, State.InWait, active, hasTargets)
+end
+
 local function startFarm()
     if State.Running then
         return
@@ -110,9 +150,12 @@ local function startFarm()
     end
 
     task.spawn(function()
+        local emptySince = nil
         while active() do
-            local target = pickTarget()
+            local hrp = getHRP()
+            local target = hrp and pickTarget(hrp)
             if target then
+                emptySince = nil
                 State.Target = target
                 State.Status = "farming"
                 local humanoid = target:FindFirstChildOfClass("Humanoid")
@@ -121,13 +164,13 @@ local function startFarm()
                     if watchHealth and humanoid.Health <= 0 then
                         break
                     end
-                    local hrp = getHRP()
+                    local currentHRP = getHRP()
                     local root = getRoot(target)
                     if not root then
                         break
                     end
-                    if hrp then
-                        pcall(standAt, hrp, root)
+                    if currentHRP then
+                        pcall(standAt, currentHRP, root)
                     end
                     RunService.Heartbeat:Wait()
                 end
@@ -137,9 +180,20 @@ local function startFarm()
                 State.Done = State.Done + 1
                 State.Target = nil
             else
-                State.Status = "waiting"
                 State.Target = nil
-                task.wait(0.2)
+                State.Status = "waiting"
+                if hrp then
+                    emptySince = emptySince or os.clock()
+                    if os.clock() - emptySince >= EMPTY_CONFIRM then
+                        resetZone(active)
+                        emptySince = nil
+                    else
+                        task.wait(0.05)
+                    end
+                else
+                    emptySince = nil
+                    task.wait(0.2)
+                end
             end
         end
     end)
@@ -170,7 +224,7 @@ local gui = create("ScreenGui", {
 
 local main = create("Frame", {
     Name = "Main",
-    Size = UDim2.fromOffset(270, 250),
+    Size = FULL_SIZE,
     Position = UDim2.fromOffset(40, 240),
     BackgroundColor3 = Color3.fromRGB(22, 22, 30),
     BorderSizePixel = 0,
@@ -257,8 +311,9 @@ end
 local statusLabel = infoLabel(62)
 local targetLabel = infoLabel(84)
 local countLabel = infoLabel(106)
+local resetLabel = infoLabel(128)
 
-local function inputRow(labelText, y, key)
+local function inputRow(labelText, y, key, lo, hi)
     create("TextLabel", {
         Size = UDim2.new(0, 120, 0, 26),
         Position = UDim2.fromOffset(12, y),
@@ -284,14 +339,16 @@ local function inputRow(labelText, y, key)
     box.FocusLost:Connect(function()
         local value = tonumber(box.Text)
         if value and value == value then
-            State[key] = math.clamp(value, -100, 100)
+            State[key] = math.clamp(value, lo, hi)
         end
         box.Text = tostring(State[key])
     end)
 end
 
-inputRow("Height", 138, "Height")
-inputRow("Distance", 170, "Distance")
+inputRow("Height", 158, "Height", -100, 100)
+inputRow("Distance", 190, "Distance", -100, 100)
+inputRow("Out wait (s)", 222, "OutWait", 0, 30)
+inputRow("In wait (s)", 254, "InWait", 0, 30)
 
 local dragging = false
 local dragStart
@@ -322,7 +379,7 @@ local minimized = false
 minimizeButton.MouseButton1Click:Connect(function()
     minimized = not minimized
     content.Visible = not minimized
-    main.Size = minimized and UDim2.fromOffset(270, 34) or UDim2.fromOffset(270, 250)
+    main.Size = minimized and MIN_SIZE or FULL_SIZE
 end)
 
 toggleButton.MouseButton1Click:Connect(function()
@@ -368,6 +425,7 @@ local function refresh()
     local target = State.Target
     targetLabel.Text = "Target: " .. (target and target.Name or "-")
     countLabel.Text = "Noobs: " .. #getTargets() .. "   Done: " .. State.Done
+    resetLabel.Text = "Zone resets: " .. State.Resets
 end
 
 task.spawn(function()
